@@ -1,0 +1,49 @@
+{
+  "raw_class_names": [
+    "almirah_dataset",
+    "chair_dataset",
+    "fridge dataset",
+    "table dataset",
+    "tv dataset"
+  ],
+  "class_names_en": [
+    "almirah",
+    "chair",
+    "fridge",
+    "table",
+    "tv"
+  ],
+  "class_names_ko": [
+    "수납장",
+    "의자",
+    "냉장고",
+    "테이블",
+    "TV"
+  ],
+  "label_info": {
+    "almirah_dataset": {
+      "en": "almirah",
+      "ko": "수납장"
+    },
+    "chair_dataset": {
+      "en": "chair",
+      "ko": "의자"
+    },
+    "fridge dataset": {
+      "en": "fridge",
+      "ko": "냉장고"
+    },
+    "table dataset": {
+      "en": "table",
+      "ko": "테이블"
+    },
+    "tv dataset": {
+      "en": "tv",
+      "ko": "TV"
+    }
+  },
+  "image_size": [
+    160,
+    160
+  ]
+}
