@@ -74,12 +74,11 @@ class FurnitureRAG:
 
 질문: {question}
 
-검색된 가구 추천 문서를 기준으로 보면, 이 가구는 공간의 용도와 분위기에 맞춰 배치하는 것이 좋습니다.
-특히 아래 근거를 참고할 수 있습니다.
+검색된 가구 추천 문서를 기준으로 보면 다음 내용을 참고할 수 있습니다.
 
 {evidence}
 
-        따라서 이 이미지는 {category_ko} 계열 상품으로 보고, 사용 공간의 크기와 원하는 분위기에 맞춰
+따라서 이 이미지는 {category_ko} 계열 상품으로 보고, 사용 공간의 크기와 원하는 분위기에 맞춰
 소재, 색상, 배치 조합을 함께 고려하는 방식으로 추천할 수 있습니다.
 """.strip()
 
@@ -94,25 +93,25 @@ class FurnitureRAG:
         context_text = ""
         if category_ko and category_en:
             context_text = (
-                f"현재 이미지 분류 결과는 {category_ko}({category_en})입니다. "
-                "이 카테고리를 우선 참고했습니다.\n\n"
+                f"현재 이미지 분석 결과는 **{category_ko}({category_en})**입니다. "
+                "이 카테고리를 우선 참고해 답변합니다.\n\n"
             )
 
         confidence_note = ""
         if confidence is not None and confidence < 0.6:
             confidence_note = (
-                "다만 이미지 분류 확률이 아주 높지는 않으므로, 현재 카테고리는 "
-                "확정값이 아니라 추천을 시작하기 위한 참고 정보로 보는 것이 좋습니다.\n\n"
+                "다만 이미지 분류 확률이 아주 높지는 않기 때문에, 현재 카테고리는 확정값이 아니라 "
+                "추천을 시작하기 위한 참고 정보로 보는 것이 좋습니다.\n\n"
             )
 
         evidence = "\n".join(f"- {doc.content}" for doc in retrieved_docs)
         return f"""
 {context_text}{confidence_note}질문: {question}
 
-검색된 가구 추천 문서를 기준으로 답변하면 다음과 같습니다.
+검색된 추천 문서를 기준으로 답변하면 다음과 같습니다.
 
 {evidence}
 
-정리하면, 질문의 핵심은 공간의 용도와 원하는 분위기에 맞춰 가구의 소재, 색상, 크기, 배치 조합을 함께 고려하는 것입니다.
-현재 답변은 RAG 검색 결과를 바탕으로 생성된 프로토타입 답변이며, 이후 LLM API를 연결하면 더 자연스러운 문장으로 확장할 수 있습니다.
+정리하면, 질문 의도와 공간의 용도에 맞춰 가구의 소재, 색상, 크기, 배치 조합을 함께 고려하는 것이 좋습니다.
+현재 답변은 RAG 검색 결과를 바탕으로 생성한 프로토타입 답변이며, 향후 LLM API를 연결하면 더 자연스러운 상담형 답변으로 확장할 수 있습니다.
 """.strip()
