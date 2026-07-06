@@ -1,6 +1,10 @@
+import json
+import os
 import re
 from dataclasses import dataclass
 from pathlib import Path
+from urllib.error import HTTPError, URLError
+from urllib.request import Request, urlopen
 
 from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.metrics.pairwise import cosine_similarity
@@ -22,6 +26,35 @@ class FurnitureRAG:
             f"{doc.title} {doc.category} {doc.content}" for doc in self.documents
         ]
         self.matrix = self.vectorizer.fit_transform(self.doc_texts)
+        self.ollama_url = self._ollama_generate_url()
+        self.ollama_timeout = float(os.getenv("OLLAMA_TIMEOUT", "240"))
+        self.ollama_num_predict = int(os.getenv("OLLAMA_NUM_PREDICT", "80"))
+        self.ollama_num_ctx = int(os.getenv("OLLAMA_NUM_CTX", "1024"))
+        self.model_candidates = self._model_candidates()
+
+    def _ollama_generate_url(self):
+        raw_url = (
+            os.getenv("OLLAMA_URL")
+            or os.getenv("OLLAMA_BASE_URL")
+            or "http://localhost:11434"
+        ).strip().rstrip("/")
+        if raw_url.endswith("/api/generate"):
+            return raw_url
+        if raw_url.endswith("/api"):
+            return f"{raw_url}/generate"
+        return f"{raw_url}/api/generate"
+
+    def _model_candidates(self):
+        env_model = os.getenv("OLLAMA_MODEL")
+        candidates = []
+        if env_model:
+            candidates.append(env_model)
+        candidates.extend(["gemma2:latest", "gemma4:e2b"])
+        deduped = []
+        for model in candidates:
+            if model and model not in deduped:
+                deduped.append(model)
+        return deduped
 
     def _load_documents(self):
         if not self.knowledge_path.exists():
@@ -40,6 +73,7 @@ class FurnitureRAG:
             title_line = lines[0].replace("## ", "").strip()
             if title_line.startswith("# "):
                 continue
+
             content = "\n".join(lines[1:]).strip()
             match = re.search(r"\[(.*?)\]", title_line)
             category = match.group(1) if match else "general"
@@ -67,21 +101,6 @@ class FurnitureRAG:
         ranked.sort(key=lambda item: item[0], reverse=True)
         return [doc for _, doc in ranked[:top_k]]
 
-    def generate_answer(self, category_ko, category_en, question, retrieved_docs):
-        evidence = "\n".join(f"- {doc.content}" for doc in retrieved_docs)
-        return f"""
-현재 이미지는 **{category_ko}({category_en})** 카테고리로 예측되었습니다.
-
-질문: {question}
-
-검색된 가구 추천 문서를 기준으로 보면 다음 내용을 참고할 수 있습니다.
-
-{evidence}
-
-따라서 이 이미지는 {category_ko} 계열 상품으로 보고, 사용 공간의 크기와 원하는 분위기에 맞춰
-소재, 색상, 배치 조합을 함께 고려하는 방식으로 추천할 수 있습니다.
-""".strip()
-
     def generate_chat_answer(
         self,
         question,
@@ -90,28 +109,168 @@ class FurnitureRAG:
         category_en=None,
         confidence=None,
     ):
-        context_text = ""
+        result = self.generate_chat_answer_with_meta(
+            question=question,
+            retrieved_docs=retrieved_docs,
+            category_ko=category_ko,
+            category_en=category_en,
+            confidence=confidence,
+        )
+        return result["answer"]
+
+    def generate_chat_answer_with_meta(
+        self,
+        question,
+        retrieved_docs,
+        category_ko=None,
+        category_en=None,
+        confidence=None,
+    ):
+        fallback_answer = self._template_answer(
+            question=question,
+            retrieved_docs=retrieved_docs,
+            category_ko=category_ko,
+            category_en=category_en,
+            confidence=confidence,
+        )
+        prompt = self._build_ollama_prompt(
+            question=question,
+            retrieved_docs=retrieved_docs,
+            category_ko=category_ko,
+            category_en=category_en,
+            confidence=confidence,
+        )
+
+        last_error = None
+        for model in self.model_candidates:
+            try:
+                answer = self._call_ollama(model=model, prompt=prompt)
+                if answer:
+                    return {
+                        "answer": answer,
+                        "source": "ollama",
+                        "model": model,
+                        "error": None,
+                    }
+            except (HTTPError, URLError, TimeoutError, OSError, ValueError) as exc:
+                last_error = (
+                    f"{model} @ {self.ollama_url}: "
+                    f"{exc.__class__.__name__}: {exc}"
+                )
+
+        return {
+            "answer": fallback_answer,
+            "source": "fallback",
+            "model": "RAG template",
+            "error": last_error,
+        }
+
+    def _call_ollama(self, model, prompt):
+        payload = {
+            "model": model,
+            "prompt": prompt,
+            "stream": False,
+            "keep_alive": "10m",
+            "options": {
+                "temperature": 0.35,
+                "top_p": 0.9,
+                "num_predict": self.ollama_num_predict,
+                "num_ctx": self.ollama_num_ctx,
+            },
+        }
+        request = Request(
+            self.ollama_url,
+            data=json.dumps(payload).encode("utf-8"),
+            headers={"Content-Type": "application/json"},
+            method="POST",
+        )
+
+        with urlopen(request, timeout=self.ollama_timeout) as response:
+            data = json.loads(response.read().decode("utf-8"))
+
+        if data.get("error"):
+            raise ValueError(data["error"])
+
+        answer = data.get("response", "").strip()
+        if not answer:
+            raise ValueError(f"{model} returned an empty response.")
+        return answer
+
+    def _build_ollama_prompt(
+        self,
+        question,
+        retrieved_docs,
+        category_ko=None,
+        category_en=None,
+        confidence=None,
+    ):
+        context = "\n\n".join(
+            f"[{doc.title}]\n{doc.content}" for doc in retrieved_docs
+        )
+        if not context:
+            context = "검색된 RAG 문서가 없습니다."
+
+        category_text = "분류 결과 없음"
         if category_ko and category_en:
-            context_text = (
-                f"현재 이미지 분석 결과는 **{category_ko}({category_en})**입니다. "
-                "이 카테고리를 우선 참고해 답변합니다.\n\n"
-            )
+            category_text = f"{category_ko}({category_en})"
+
+        confidence_text = "확률 정보 없음"
+        if confidence is not None:
+            confidence_text = f"{confidence * 100:.1f}%"
+
+        return f"""
+너는 가구 쇼핑몰의 이미지 기반 추천 상담 AI다.
+반드시 아래 RAG 문서와 이미지 분류 결과를 근거로 답한다.
+근거가 부족하면 확정적으로 말하지 말고, 참고용 추천이라고 표현한다.
+Answer in Korean, within 3 short practical sentences.
+불필요한 이모티콘이나 장식 문자는 사용하지 않는다.
+
+[이미지 분류 결과]
+- 예측 카테고리: {category_text}
+- 예측 확률: {confidence_text}
+
+[사용자 질문]
+{question}
+
+[RAG 검색 문서]
+{context}
+
+[답변 형식]
+- Sentence 1: identify the furniture image briefly.
+- Sentence 2: recommend placement or style.
+- Sentence 3: mention one caution or extra check.
+""".strip()
+
+    def _template_answer(
+        self,
+        question,
+        retrieved_docs,
+        category_ko=None,
+        category_en=None,
+        confidence=None,
+    ):
+        category_text = "현재 이미지"
+        if category_ko and category_en:
+            category_text = f"{category_ko}({category_en})"
 
         confidence_note = ""
         if confidence is not None and confidence < 0.6:
             confidence_note = (
-                "다만 이미지 분류 확률이 아주 높지는 않기 때문에, 현재 카테고리는 확정값이 아니라 "
-                "추천을 시작하기 위한 참고 정보로 보는 것이 좋습니다.\n\n"
+                "예측 확률이 아주 높지는 않으므로, 현재 카테고리는 참고용으로 보는 것이 좋습니다.\n\n"
             )
 
         evidence = "\n".join(f"- {doc.content}" for doc in retrieved_docs)
-        return f"""
-{context_text}{confidence_note}질문: {question}
+        if not evidence:
+            evidence = "- 관련 문서가 충분히 검색되지 않았습니다."
 
-검색된 추천 문서를 기준으로 답변하면 다음과 같습니다.
+        return f"""
+현재 분석 결과를 기준으로 보면, {category_text} 계열의 가구로 판단됩니다.
+
+{confidence_note}질문: {question}
+
+검색된 RAG 문서를 참고하면 다음 내용을 근거로 추천할 수 있습니다.
 
 {evidence}
 
-정리하면, 질문 의도와 공간의 용도에 맞춰 가구의 소재, 색상, 크기, 배치 조합을 함께 고려하는 것이 좋습니다.
-현재 답변은 RAG 검색 결과를 바탕으로 생성한 프로토타입 답변이며, 향후 LLM API를 연결하면 더 자연스러운 상담형 답변으로 확장할 수 있습니다.
+정리하면, 공간의 크기와 사용 목적을 먼저 정하고 소재, 색상, 배치 조합을 함께 고려하는 방식이 좋습니다. 현재 답변은 로컬 Ollama 연결이 없을 때 제공되는 RAG 기반 대체 답변입니다.
 """.strip()
