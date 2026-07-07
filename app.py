@@ -4,6 +4,19 @@ from pathlib import Path
 import altair as alt
 import pandas as pd
 import streamlit as st
+import os
+
+try:
+    if "GEMINI_API_KEY" in st.secrets:
+        os.environ.setdefault("GEMINI_API_KEY", str(st.secrets["GEMINI_API_KEY"]))
+    if "GEMINI_MODEL" in st.secrets:
+        os.environ.setdefault("GEMINI_MODEL", str(st.secrets["GEMINI_MODEL"]))
+    if "GROQ_API_KEY" in st.secrets:
+        os.environ.setdefault("GROQ_API_KEY", str(st.secrets["GROQ_API_KEY"]))
+    if "GROQ_MODEL" in st.secrets:
+        os.environ.setdefault("GROQ_MODEL", str(st.secrets["GROQ_MODEL"]))
+except Exception:
+    pass
 
 from image_predictor import FurnitureImagePredictor
 from rag_core import FurnitureRAG
@@ -15,7 +28,7 @@ KNOWLEDGE_PATH = BASE_DIR / "data" / "furniture_knowledge.md"
 
 st.set_page_config(
     page_title="가구 추천 AI",
-    page_icon="home",
+    page_icon="house",
     layout="wide",
 )
 
@@ -751,7 +764,7 @@ with right_col:
             top_k=1,
         )
         st.session_state.last_docs = docs
-        with st.spinner("Generating answer with local Ollama Gemma. This may take 1-3 minutes on CPU."):
+        with st.spinner("Generating recommendation answer..."):
             answer_result = rag.generate_chat_answer_with_meta(
                 question=query,
                 retrieved_docs=docs,
@@ -766,7 +779,14 @@ with right_col:
 
     if st.session_state.last_answer:
         answer_html = escape(st.session_state.last_answer).replace("\n", "<br>")
-        source_label = "Ollama Gemma" if st.session_state.last_answer_source == "ollama" else "RAG 문서 기반 답변"
+        source_label_map = {
+            "gemini": "Gemini API",
+            "groq": "Groq API",
+            "ollama": "Ollama Gemma",
+            "fallback": "RAG document answer",
+        }
+        source_key = st.session_state.last_answer_source or "fallback"
+        source_label = source_label_map.get(source_key, "RAG document answer")
         model_label = st.session_state.last_answer_model or source_label
         source_html = escape(f"{source_label} / {model_label}")
         st.markdown(
@@ -781,9 +801,9 @@ with right_col:
         )
 
         if st.session_state.last_answer_source == "fallback":
-            st.info("Ollama 응답을 받지 못해 RAG 문서 기반 답변으로 대체되었습니다. 아래 오류를 확인해 주세요.")
+            st.info("AI model response was not available, so a RAG document answer was used.")
             if st.session_state.last_answer_error:
-                with st.expander("Ollama 오류 확인"):
+                with st.expander("AI response error"):
                     st.code(st.session_state.last_answer_error)
 
         with st.expander("검색된 RAG 근거 문서 보기"):
