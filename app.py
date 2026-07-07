@@ -6,17 +6,40 @@ import pandas as pd
 import streamlit as st
 import os
 
-try:
-    if "GEMINI_API_KEY" in st.secrets:
-        os.environ.setdefault("GEMINI_API_KEY", str(st.secrets["GEMINI_API_KEY"]))
-    if "GEMINI_MODEL" in st.secrets:
-        os.environ.setdefault("GEMINI_MODEL", str(st.secrets["GEMINI_MODEL"]))
-    if "GROQ_API_KEY" in st.secrets:
-        os.environ.setdefault("GROQ_API_KEY", str(st.secrets["GROQ_API_KEY"]))
-    if "GROQ_MODEL" in st.secrets:
-        os.environ.setdefault("GROQ_MODEL", str(st.secrets["GROQ_MODEL"]))
-except Exception:
-    pass
+AI_SETTING_KEYS = ("GEMINI_API_KEY", "GEMINI_MODEL", "GROQ_API_KEY", "GROQ_MODEL")
+
+
+def _read_app_secrets_file():
+    secrets_path = Path(__file__).resolve().parent / ".streamlit" / "secrets.toml"
+    if not secrets_path.exists():
+        return {}
+
+    settings = {}
+    for raw_line in secrets_path.read_text(encoding="utf-8").splitlines():
+        line = raw_line.strip()
+        if not line or line.startswith("#") or "=" not in line:
+            continue
+        key, value = line.split("=", 1)
+        key = key.strip()
+        if key in AI_SETTING_KEYS:
+            settings[key] = value.strip().strip('"').strip("'")
+    return settings
+
+
+def _load_ai_environment():
+    for key, value in _read_app_secrets_file().items():
+        if value:
+            os.environ[key] = value
+
+    try:
+        for key in AI_SETTING_KEYS:
+            if key in st.secrets and str(st.secrets[key]).strip():
+                os.environ[key] = str(st.secrets[key]).strip()
+    except Exception:
+        pass
+
+
+_load_ai_environment()
 
 from image_predictor import FurnitureImagePredictor
 from rag_core import FurnitureRAG
@@ -536,7 +559,6 @@ def load_predictor():
     return FurnitureImagePredictor()
 
 
-@st.cache_resource
 def load_rag():
     return FurnitureRAG(KNOWLEDGE_PATH)
 
