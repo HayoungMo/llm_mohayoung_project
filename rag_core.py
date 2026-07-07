@@ -37,7 +37,7 @@ class FurnitureRAG:
         self.gemini_models = (
             [gemini_model]
             if gemini_model
-            else ["gemini-1.5-flash", "gemini-1.5-flash-latest"]
+            else ["gemini-2.5-flash", "gemini-2.0-flash", "gemini-flash-latest"]
         )
         self.gemini_url_template = os.getenv(
             "GEMINI_API_URL",
@@ -203,6 +203,25 @@ class FurnitureRAG:
                         f"{exc.__class__.__name__}: {exc}"
                     )
 
+        ollama_available, ollama_error = self._check_ollama()
+        if ollama_available:
+            for model in self.model_candidates:
+                try:
+                    answer = self._call_ollama(model=model, prompt=prompt)
+                    if answer:
+                        return {
+                            "answer": answer,
+                            "source": "ollama",
+                            "model": model,
+                            "error": None,
+                        }
+                except Exception as exc:
+                    last_error = (
+                        f"{model} @ {self.ollama_url}: "
+                        f"{exc.__class__.__name__}: {exc}"
+                    )
+        elif not self.gemini_api_key and not self.groq_api_key:
+            last_error = ollama_error
 
         return {
             "answer": fallback_answer,
@@ -294,6 +313,18 @@ class FurnitureRAG:
         if not answer:
             raise ValueError(f"{model} returned an empty response.")
         return answer
+
+    def _check_ollama(self):
+        tags_url = f"{self.ollama_url.rsplit('/', 1)[0]}/tags"
+        try:
+            with urlopen(tags_url, timeout=2) as response:
+                response.read()
+            return True, None
+        except Exception as exc:
+            return (
+                False,
+                f"Ollama 연결 실패: {tags_url} ({exc.__class__.__name__}: {exc})",
+            )
 
     def _call_ollama(self, model, prompt):
         payload = {
@@ -404,4 +435,3 @@ Answer in Korean, within 3 short practical sentences.
 
 정리하면, 공간의 크기와 사용 목적을 먼저 정하고 소재, 색상, 배치 조합을 함께 고려하는 방식이 좋습니다. 현재 답변은 로컬 Ollama 연결이 없을 때 제공되는 RAG 기반 대체 답변입니다.
 """.strip()
-
