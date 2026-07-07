@@ -203,21 +203,6 @@ class FurnitureRAG:
                         f"{exc.__class__.__name__}: {exc}"
                     )
 
-        for model in self.model_candidates:
-            try:
-                answer = self._call_ollama(model=model, prompt=prompt)
-                if answer:
-                    return {
-                        "answer": answer,
-                        "source": "ollama",
-                        "model": model,
-                        "error": None,
-                    }
-            except (HTTPError, URLError, TimeoutError, OSError, ValueError) as exc:
-                last_error = (
-                    f"{model} @ {self.ollama_url}: "
-                    f"{exc.__class__.__name__}: {exc}"
-                )
 
         return {
             "answer": fallback_answer,

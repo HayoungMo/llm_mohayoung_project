@@ -782,8 +782,7 @@ with right_col:
         source_label_map = {
             "gemini": "Gemini API",
             "groq": "Groq API",
-            "ollama": "Ollama Gemma",
-            "fallback": "RAG document answer",
+            "fallback": "RAG 문서 기반 답변",
         }
         source_key = st.session_state.last_answer_source or "fallback"
         source_label = source_label_map.get(source_key, "RAG document answer")
@@ -801,10 +800,7 @@ with right_col:
         )
 
         if st.session_state.last_answer_source == "fallback":
-            st.info("AI model response was not available, so a RAG document answer was used.")
-            if st.session_state.last_answer_error:
-                with st.expander("AI response error"):
-                    st.code(st.session_state.last_answer_error)
+            st.info("외부 AI 응답이 없어 RAG 문서 기반 답변으로 대체했습니다.")
 
         with st.expander("검색된 RAG 근거 문서 보기"):
             for doc in st.session_state.last_docs:
